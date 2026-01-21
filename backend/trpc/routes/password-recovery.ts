@@ -1,9 +1,8 @@
 import * as z from "zod";
 import { Resend } from "resend";
+import { TRPCError } from "@trpc/server";
 
 import { createTRPCRouter, publicProcedure } from "../create-context";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const passwordRecoveryRouter = createTRPCRouter({
   sendRecoveryEmail: publicProcedure
@@ -15,7 +14,19 @@ export const passwordRecoveryRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       console.log('📧 Sending password recovery email to:', input.email);
       
+      const apiKey = process.env.RESEND_API_KEY;
+      
+      if (!apiKey) {
+        console.error('❌ RESEND_API_KEY is not configured');
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Email service is not configured. Please contact administrator.',
+        });
+      }
+      
       try {
+        const resend = new Resend(apiKey);
+        
         const { data, error } = await resend.emails.send({
           from: 'Botonera X <onboarding@resend.dev>',
           to: input.email,
@@ -37,15 +48,26 @@ export const passwordRecoveryRouter = createTRPCRouter({
         });
 
         if (error) {
-          console.error('❌ Resend error:', error);
-          throw new Error(error.message || 'Failed to send email');
+          console.error('❌ Resend error:', JSON.stringify(error));
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: error.message || 'Failed to send email',
+          });
         }
 
         console.log('✅ Password recovery email sent:', data?.id);
         return { success: true, messageId: data?.id };
       } catch (error) {
         console.error('❌ Error sending recovery email:', error);
-        throw error;
+        
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Failed to send recovery email',
+        });
       }
     }),
 });
